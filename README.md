@@ -23,14 +23,20 @@ To add legs, use wire advanced entity markers. Link these to the leg pieces in a
 
 Got any questions? You can find me on both the [ACF](https://discord.gg/jf4cwarPUG) and [Wiremod](https://discord.gg/H8UKY3Y) discord servers. I will be glad to help you out. Be nice.
 
+
 ### Controls
 The basic controls are:
 
 **W and S** - Backwards and forwards
+
 **S and D** - Depends on if mouse control is turned on. If it is, is used to strafe left or right. If not, is used to turn left and right.
+
 **Shift** - The sprint key
+
 **Control** - The crouch key
+
 (Wireable) **Cycle Zoom** - Cycles the zoom between the two zoom levels. I typically put his on Mouse 2.
+
 
 ### Known issues
 Two-legged mechs that have one leg fall off a ledge won't be able to move. As a workaround, try to turn to either push the mech off the ledge, or get the hanging leg back up on the ledge again.
