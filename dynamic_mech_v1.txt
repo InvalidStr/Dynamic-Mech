@@ -1,0 +1,971 @@
+#Made by Bad_Idea, with lots of support and help by Meta
+#Thank you to H4NK_7457, Octo and ChogChey for helping me test the chip as it evolved
+
+@name Dynamic Mech V1
+@inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Pod Cam]:wirelink [CycleZoom]:number
+@outputs [Throttle]:number [Filter]:array
+@persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio ZoomMin ZoomMax Interval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchVal Yaw Zoom Feet OriginalAmount Deviation ChromaticNumber]:number
+@persist [DirMul LenX LenY LenZ LastMoveDir]:vector
+@persist [EngineSound]:string
+@persist [Entities LegEntities StepQueue]:array
+@persist [Local FootZ Stepsounds]:table 
+@trigger CycleZoom
+
+
+#I wish this didn't have to be here
+function void addFoot(E:entity, R:vector, Id:number, Neigh:array, LegPieces:array)
+{
+    if (Id == 1)
+    { 
+        Entities = array()
+        LegEntities = array()
+        FootZ = table()
+    }
+    
+    Entities[Id,entity] = E
+    E["id",number] = Id
+    E["goal",vector] = vec(0,0,0)
+    E["start",vector] = vec(0,0,0)
+    E["current",vector] = vec(0,0,0)
+    E["rest",vector] = vec(R:x(),R:y(),R:z())
+    E["previous",vector] = vec(0,0,0)
+    E["adjusted",vector] = vec(0,0,0)
+    E["neighbours",array] = Neigh
+    E["precomputed",array] = array()
+    E["speed",number] = 0
+    E["lead",number] = 0
+    E["distance",number] = 0
+    E["legEnts",array] = LegPieces
+    E["roped",number] = 0
+    
+    FootZ[E:id(),vector] = R
+    
+    LegEntities = LegEntities:add(LegPieces)
+    
+    E["soundcooldown",number] = curtime()+1
+    trackCollision(E)
+    
+    local Prev = E
+    foreach(PieceId:number, Piece:entity = LegPieces)
+    {
+        Piece["parent",entity] = E
+        Piece["mainparent",entity] = Base
+        Piece["parentId",number] = Id
+        Piece["prev",entity] = Prev
+        Prev["next",entity] = Piece
+        Prev = Piece
+        
+        if (PieceId == LegPieces:count())
+        {
+            Piece["next",entity] = Base
+        }
+    }
+} 
+
+function void addStepSound(Id:number, S:string)
+{
+    if (Id == 1)
+    { 
+        Stepsounds = table()
+    }
+    
+    Stepsounds:pushString(S)
+}
+
+#Variables the user should be touching (mostly)
+if (first()|dupefinished())
+{ 
+    ConstrainAfterSpawn = 0 #Should constraints be remade after the initial load? Also moves the base and the props into their respective positions. Set this to 1 whenever you change something about the setup
+    
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+#Syntax for adding a foot to the system:
+#addFoot(Foot entity, positioning vector(Back/forwards, side to side, height), Foot index (must be unique and sequential), Array of neighbouring foot indexes, Array of leg entities (ordered in closest from the foot to closest to the base))
+
+    #None of these are necessary beyond setting the foot positons. You can just as easily just input numbers. Recommended (required) to keep the same height for all feet.
+    Height              = 65 #How far below the mech will the feet be placed
+    Width               = 30 #How far to the side will the feet be placed
+    Offset              = 10 #How far back/forwards will the feet be placed
+
+    addFoot(FootL, vec(Offset,Width,-Height),1,array(2),FootLLeg)
+    addFoot(FootR, vec(Offset,-Width,-Height),2,array(1),FootRLeg)
+    
+    #2 foot example:
+   #addFoot(FootL, vec(Offset,Width,-Height),1,array(2),FootLLeg)
+   #addFoot(FootR, vec(Offset,-Width,-Height),2,array(1),FootRLeg)
+    
+    #3 foot example:
+   #RadiusFeet = 50
+   #addFoot(FootM, vec(RadiusFeet * cos(0),   RadiusFeet * sin(0),   -Height), 1, array(2,3), FootMLeg)
+   #addFoot(FootL, vec(RadiusFeet * cos(120), RadiusFeet * sin(120), -Height), 2, array(1,3), FootLLeg)
+   #addFoot(FootR, vec(RadiusFeet * cos(240), RadiusFeet * sin(240), -Height), 3, array(1,2), FootRLeg)
+
+    #4 foot example
+   #addFoot(FootL, vec(Offset,Width,-Height),1,array(2,3),FootLLeg)
+   #addFoot(FootR, vec(Offset,-Width,-Height),2,array(1,4),FootRLeg)
+   #addFoot(FootBL, vec(-Offset,Width,-Height),3,array(1,4),FootBLLeg)
+   #addFoot(FootBR, vec(-Offset,-Width,-Height),4,array(2,3),FootBRLeg)
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
+    
+    Length              = 1500 #Hydraulic length, generally don't touch
+    Constant            = 10000 #Hydralic constant
+    Damping             = 2500 #Hydraulic damping
+    Heavy               = 0 #Doubles up on all hydraulics, only for use on the heaviest of mechs. Only use if one set of hydraulics absolutely cannot hold the weight of the mech up
+    
+    StepLength          = 45 #Unmodified max step length, sprinting can increase this
+    StepHeight          = 35 #How high does the mech lift its feet when taking a step
+    MinFootHeight       = StepHeight #How far above its rest position can a foot can go
+    MaxFootHeight       = 20 #How far below its rest position can a foot can go
+    PushDown            = 10 #Pushes down against the ground as a step is being taken. Provides more friction for walking on slopes. Raise if feet slip when walking up angles, but try to keep low
+    DirMul              = vec(1,0.5,0) #Direction multiplier. Decides how far the feet can travel to the side/front of the mech
+    OvershootMul        = 1.25 #How much the hydraulics should try to overshoot the target. Leads to snappier and more responsive foot movement, but setting too high will make them overshoot a lot/move unreliably
+    
+    Radius              = 55 #Radius around the feet that has to be kept clear, used for calculating the offset center point. Use the debug option to see the point
+    DebugRadius         = 0 #If you want to show the debug holograms for the radius, placed where the adjusted allowed centre of motion is
+    LinearRadius        = 1 #If linear or projected radius clamping is to be used. Linear goes linearly from the rest postion. Projected goes from the the adjusted centre of motion
+    
+    Diff                = 5 #The allowed max difference between the current position and the goal position. Low values can give a stilted walk/make the feet never settle and high values will make the feet positioning unreliable/make the mech not step when it should
+    
+    CrouchHeight        = 20 #How far down does the crouch go, cannot be under MinFootHeight without issues
+    CrouchSpeed         = 0.25 #How fast does the mech crouch. Min/Max for this is 0/1 so choose a value inbetween
+    
+    TiltInfluence       = 0.15 #How much the relative heights of the feet affects the tilt of the mech. 0 - No influence, base stays perfectly still, 1 - Max influence, base will fully follow along with the feet. Generally keep low unless you want terrain following
+    TerrainInfluence    = 1 # 0 - 1, Adjusts how much the mech cares about the terrain level under it. At 0 it doesn't care at all and will always stay upright. At 1 it will fully follow the terrain under it
+    
+    MouseControl        = 1 #Is the mech controlled with the mouse or WASD?
+
+    Speed               = 10 #How fast does the feet move unmodified
+    StillTurnSpeed      = 10 #How fast do the feet move when turning on the spot
+    StillTurnAngle      = 45 #At which angle are the feet locations rotated when turning on the spot
+    TurnSpeed           = 15 #How fast does the mech turn
+    TurnLimit           = 5 #How much does the turn angle have to differ before you start turning in place
+    
+    SprintSpeedMul      = 2.5 #Max modifier the throttle can have on the speed of the feet
+    SprintLengthMul     = 1.10 #Max modifier the throttle can have on the step length of the feet
+    SprintStates        = 1/5 #How many sprint states should there be
+    SprintUpMul         = 1 #How quickly does the sprint ramp up
+    SprintDownMul       = 2 #How quickly does the sprint ramp down
+    SprintInertia       = 0.05 #How many percent change of the move direction are allowed when at max sprint
+    SprintTurnInertia   = 0.05 #How many percent change of the turn direction are allowed when at max sprint
+    
+    WaterMul            = 0.5 #Speed multiplier for feet in water
+    
+    MousePitchControl   = 1 #If the mouse control also controlls the pitch, only active when MouseControl = 1. Generally useful for mechs that have to aim the entire body at a target
+    PitchWhilstCrouched = 0 #Does the pitching work whilst crouched?
+    
+    PitchMax            = 25 #Max pitch angle 
+    PitchMin            = 5 #Min pitch angle 
+    PitchSpeed          = 2.5 #Speed at which the Pitch is allowed to change
+    IdlePitchTarget     = 5 #The pitch the mech stays at when crouched (and pitchwhilstcrouched is off) or unpiloted (Note: Inverted, -5 is aiming down by 5 degrees and +5 is the opposite)
+    
+    BaseMass            = 250 #Mass of the base entity
+    FootMass            = 125 #Mass of the feet entities
+    
+    BaseInertia         = 50000 #Inertia of the base. Keep high. Don't touch unless you know what you are doing
+    FootInertia         = 5000 #Inertia of the Feet. Keep high. Don't touch unless you know what you are doing
+    
+    BaseForce           = 4000000 #Force of the keep upright/turn applyAngForce (Shamelessly stolen from Meta)
+    AngVelDamp          = 2000000 #Damping of the keep upright/turn applyAngForce (Shamelessly stolen from Meta)
+    
+    StabilityRatio      = 0.4 #How close to the center/base positon the centroid of the feet has to be before the mech is considered dead. Only runs on foot/leg destruction
+    
+    Campos              = vec(0,0,40) #Position of the camera, relative to the base
+    ZoomMin             = 50 #How close to the mech the camera is when zoomed in
+    ZoomMax             = 150 #How close to the mech the camera is when zoomed out
+        
+    Interval            = 1/10 #Interval of the chip. 1/10 is a nice responsive middle ground with good performance. You can play around with this if you want better performance
+    
+    #Add step sounds, formating is addStepSound(Id (sequential, rising), string sound). If you add more than one it will randomly pick one when stepping
+    addStepSound(1,"npc/dog/dog_footstep1.wav")
+    addStepSound(2,"npc/dog/dog_footstep2.wav")
+    addStepSound(3,"npc/dog/dog_footstep3.wav")
+    addStepSound(4,"npc/dog/dog_footstep4.wav")
+    StepVol = 1 #Volume of the step
+    StepPitch = 80 #Pitch of the step
+    
+    EngineSound         = "acf_extra/vehiclefx/idle/diesel7.wav" #Which sound will be used for the mech engine sounds
+    SoundVolume         = 1 #Engine volume
+    BasePitch           = 80 #What pitch will the engine be at when idle
+    PitchRange          = 60 #How far can the pitch move when moving
+    MaxSpeed            = 200 #At which speed do you see the highest pitch
+    
+    StepCooldown        = 0.25 #Cooldown for each foot making a stepping sound (in seconds)
+    
+#--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#   
+    #Stuff below here is setting global persisted constants. Don't touch anything below here unless you want to experience unexpected consequences
+    LenX = vec(Length,0,0)
+    LenY = vec(0,Length,0)
+    LenZ = vec(0,0,Length)
+    
+    Throttle = Pitch = EngineLoad = PitchVariation = CrouchVal = Yaw = Pitch = 0
+    
+    Base:setMass(BaseMass)
+    Base:propInertia(vec(BaseInertia))
+    
+    LastMoveDir = vec(0)
+    
+    Cam["Position",vector] = Campos
+    Cam["Distance",number] = Zoom = ZoomMax
+    Cam["FOV",number] = 90
+    Cam["Parent",entity] = Base
+    Cam["Activated",number] = 1
+    
+    Base:soundPlay(1,0,EngineSound)
+    soundPitch(1,BasePitch)
+    soundVolume(1,0)
+    
+    StepQueue = array()
+    Local = table()
+    
+    Feet = OriginalAmount = Entities:count()
+}
+else
+{
+    Cam["Distance",number] = Zoom = ((~CycleZoom) & CycleZoom) ? (Zoom > ZoomMin) ? ZoomMin : ZoomMax : Zoom
+    exit()
+}
+
+#Venture below at your own risk
+
+function entity compare(T1:entity, T2:entity)
+{
+    if(!T1["saturation",number] != T2["saturation",number])
+    {
+        return T1["saturation",number] > T2["saturation",number] ? T1 : T2
+    }
+    elseif (!T1["degree",number] != T2["degree",number])
+    {
+        return T1["degree",number] > T2["degree",number] ? T1 : T2
+    }
+    else
+    {
+        return T1["id",number] > T2["id",number] ? T1 : T2
+    }
+}
+
+function void dSatur()
+{
+    local Queue = array()
+    local UsedColours = table()
+    local Assigned = table()
+    ChromaticNumber = 0
+
+    foreach(_:number, Point:entity = Entities)
+    {
+        Point["colour",number] = -1
+        Point["saturation",number] = 0
+        Point["degree",number] = Point["neighbours",array]:count()
+        Point["adjacent",table] = table()
+        Queue:pushEntity(Point)
+    }
+
+    while (Queue:count() > 0)
+    {
+        local Entity = Queue[1,entity]
+        foreach(_:number, E:entity = Queue)
+        {
+            Entity = compare(Entity, E)
+        }
+        Queue:remove(Queue:indexOf(Entity))
+
+        foreach(_:number, N:number = Entity["neighbours",array])
+        {
+            local Neighbour = Entities[N,entity]
+            local C = Neighbour["colour",number]
+            if (C != -1)
+            {
+                UsedColours[C,number] = 1
+            }
+        }
+
+        local Colour = 0
+        while (UsedColours[Colour,number])
+        {
+            Colour += 1
+        }
+
+        Entity["colour",number] = Assigned[Entity["id",number],number] = Colour
+        ChromaticNumber = max(ChromaticNumber, Colour + 1)
+
+        foreach(C:number, _:number = UsedColours)
+        {
+            UsedColours:remove(C)
+        }
+
+        foreach(_:number, N:number = Entity["neighbours",array])
+        {
+            local Neighbour = Entities[N,entity]
+            if (Neighbour["colour",number] == -1)
+            {
+                Neighbour["adjacent",table][Colour,number] = 1
+                Neighbour["saturation",number] = Neighbour["adjacent",table]:count()
+                Neighbour["degree",number] = Neighbour["degree",number] - 1
+            }
+        }
+    }
+}
+
+timer("initial", 0.1, function() {
+    
+    foreach(_:number, E:entity = Entities)
+    {   
+        E:constraintBreak("rope",Base)
+        if (!E["constrained",number]|ConstrainAfterSpawn)
+        {
+            E:constraintBreak(Base)
+            E:constraintBreak(world())
+        }
+    }
+    
+    dSatur()
+            
+    enableConstraintUndo(0)
+    Base:propFreeze(1)
+    
+    if (!Base["constrained",number]|ConstrainAfterSpawn)
+    {
+        Base:setAng(ang(0,90,0))
+    }
+    
+    rangerPersist(1)
+    rangerHitEntities(0)
+    rangerDefaultZero(0)
+    rangerIgnoreWorld(0)
+        
+    foreach(_:number, E:entity = Entities)
+    {
+        E:propFreeze(1)  
+        if (!E["constrained",number]|ConstrainAfterSpawn)
+        {
+            local P = Base:toWorld(E["rest",vector])
+            
+            E:propPhysicalMaterial("jalopytire")
+            E:setMass(FootMass)
+            E:propInertia(vec(FootInertia))
+            E:propGravity(1)
+            #E:setAng(Base:angles())
+            E:setPos(P)
+        }
+    }
+    timerResume("ballsocketBugFix")
+})
+timerPause("initial")
+
+#Bypassing a ballsocket-to-world bug
+#A ballsocket won't behave as it should if it's to world, so by doing this they're forced into behaving
+timer("ballsocketBugFix", 0.1, function() {
+    foreach(_:number, E:entity = Entities)
+    {
+        if (!E["constrained",number]|ConstrainAfterSpawn)
+        {
+            E:setAng(E:angles()+ang(0,180,0))
+            ballsocket(E, vec(0), world(), vec(-0.01,-0.01,-180), vec(0.01,0.01,180), vec(0), 1)
+        }
+    }
+    
+    timerResume("constraints")
+})
+timerPause("ballsocketBugFix")
+
+timer("constraints", 0.1, function() {
+    
+    foreach(_:number, E:entity = Entities)
+    {
+        if (!E["constrained",number]|ConstrainAfterSpawn)
+        {
+            E:setAng(E:angles()+ang(0,180,0))
+            local P = E["rest",vector]
+                    
+            ballsocket(Base, vec(0), E, vec(-180,-180,-0.01), vec(180,180,0.01), vec(0), 1)
+            ballsocket(E, vec(0), world(), vec(-0.01,-0.01,-180), vec(0.01,0.01,180), vec(0), 1)
+            
+            #X
+            hydraulic(1, E, vec(0,0,0),Base, P-vec(-Length,0,0), Constant,Damping,0.1, "",0,0)
+            hydraulic(2, E, vec(0,0,0),Base, P-vec(Length,0,0), Constant,Damping,0.1, "",0,0)
+            #Y
+            hydraulic(3, E, vec(0,0,0),Base, P-vec(0,-Length,0), Constant,Damping,0.1, "",0,0)
+            hydraulic(4, E, vec(0,0,0),Base, P-vec(0,Length,0), Constant,Damping,0.1, "",0,0)
+            #Z
+            hydraulic(5, E, vec(0,0,0),Base, P-vec(0,0,-Length), Constant,Damping,0.1, "",0,0)
+            hydraulic(6, E, vec(0,0,0),Base, P-vec(0,0,Length), Constant,Damping,0.1, "",0,0)
+            if(Heavy)
+            {
+                #X
+                hydraulic(7, E, vec(0,0,0),Base, P-vec(-Length,0,0), Constant,Damping,0.1, "",0,0)
+                hydraulic(8, E, vec(0,0,0),Base, P-vec(Length,0,0), Constant,Damping,0.1, "",0,0)
+                #Y
+                hydraulic(9, E, vec(0,0,0),Base, P-vec(0,-Length,0), Constant,Damping,0.1, "",0,0)
+                hydraulic(10, E, vec(0,0,0),Base, P-vec(0,Length,0), Constant,Damping,0.1, "",0,0)
+                #Z
+                hydraulic(11, E, vec(0,0,0),Base, P-vec(0,0,-Length), Constant,Damping,0.1, "",0,0)
+                hydraulic(12, E, vec(0,0,0),Base, P-vec(0,0,Length), Constant,Damping,0.1, "",0,0)
+            }
+        }
+        E["constrained",number] = 1
+    } 
+    
+    
+    rangerHitEntities(1)
+    rangerFilter(Base)
+    rangerFilter(Base:children())
+    BaseEnts = Base:getConnectedEntities()
+    BaseEnts:remove(BaseEnts:indexOf(world()))
+    rangerFilter(BaseEnts)
+    rangerFilter(players())
+    
+    local PointsAdjusted = table()
+    
+    foreach(Id:number, E:entity = Entities)
+    { 
+        PointsAdjusted[Id,vector] = E["rest",vector]
+    }
+    
+    local Iterations = 15
+    
+    for (I = 1, Iterations, 1)
+    {
+        local MoveDir = table()
+        local MoveAmt = table()
+    
+        foreach (ID:number, V:vector = PointsAdjusted)
+        {
+            local Sum      = vec(0)
+            local Count    = 0
+            local MinDist  = Radius * 2
+    
+            foreach (ID2:number, V2:vector = PointsAdjusted)
+            {
+                if (ID == ID2) { continue }
+
+                local D = V:distance(V2)
+                if (D < Radius * 2)
+                {
+                    Sum    += V2
+                    Count  += 1
+                    MinDist = min(MinDist, D)
+                }
+            }
+
+            if (Count > 0)
+            {
+                local Center = Sum / Count
+                local Dir    = (V - Center)
+
+                if (Dir:length() > 0)
+                {
+                    Dir = Dir:normalized()
+
+                    local Delta = (Radius * 2 - MinDist) / 2
+
+                    MoveDir[ID,vector] = Dir
+                    MoveAmt[ID,number] = Delta
+                }
+            }
+        }
+
+        foreach (Id:number, Amt:number = MoveAmt)
+        {
+            local Cur = PointsAdjusted[Id,vector]
+            local Dir = MoveDir[Id,vector]
+            PointsAdjusted[Id,vector] = Cur + Dir * Amt
+        }
+    
+        if (I == Iterations)
+        {
+            foreach (Id:number, E:entity = Entities)
+            {
+                local Rest = E["rest",vector]
+                E["adjusted",vector] = PointsAdjusted[Id,vector] - Rest
+            }
+        }
+    }
+    
+    if (DebugRadius)
+    {
+        foreach(Id:number, V:vector = PointsAdjusted)
+        {
+            holoCreate(Id+10)
+            holoPos(Id+10, Base:toWorld(V))
+            holoParent(Id+10,Base)
+            holoScale(Id+10,vec(1.5))
+        }
+    }
+
+    Cam["FilterEntities",array] = Filter = BaseEnts
+    Base["constrained",number] = 1
+    timerResume("run")
+})
+timerPause("constraints")
+timerResume("initial")
+
+function void precomputeLocalization()
+{
+    Local["Pos",vector] = Base:pos()
+    local Yaw = Base:angles():yaw()
+    local Cos = cos(Yaw)
+    local Sin = sin(Yaw)
+    
+    Local["F",vector] = vec(Cos,Sin,0)
+    Local["R",vector] = vec(-Sin,Cos,0)
+}
+
+function vector toWorldYaw(V:vector)
+{
+    return Local["Pos",vector] + Local["F",vector]*V:x() + Local["R",vector]*V:y() + vec(0,0,V:z())
+}
+
+function vector toLocalYaw(V:vector)
+{
+    local Rel = V - Local["Pos",vector]
+    return vec(Rel:dot(Local["F",vector]), Rel:dot(Local["R",vector]), Rel:z())
+}
+
+function void advance()
+{
+    AverageDist = array()
+    foreach(_:number, Entity:entity = Entities)
+    {
+        local Target = Entity["goal",vector]
+        local Start = Entity["start",vector]
+        local Current = Entity["current",vector]
+        local SpeedVal = Entity["speed",number]
+        local Lead = Entity["lead",number]
+        local Rest = Entity["rest",vector]
+        local Distance = Entity["distance",number]
+        local LiftMod = Entity["liftMod",number]
+            
+        local Dist = Current:distance(Target)
+    
+        local Percentage = min(SpeedVal / Dist, 1)
+        local MovePos = lerp(Current, Target, Percentage)
+        
+        AverageDist:pushNumber(Dist)
+            
+        Entity["current",vector] = MovePos
+
+        local Z = Lead ? (Distance > Diff) ? StepHeight *LiftMod * sinr(clamp(((Target - Current):length() / Diff), 0, 1) * (_PI * 0.5)) : 0 : -lerp(0, PushDown, clamp((Distance - Dist) / Distance, 0, 1))
+        MovePos += vec(0,0,Z)
+        
+        local Dir = Target - Start
+        local P = atan2(Dir:z(), sqrt(Dir:x()^2 + Dir:y()^2))
+        MovePos:rotateAroundAxis(vec(0,1,0), toDeg(P))
+
+        local WorldPos  = toWorldYaw(Rest + MovePos)
+        local HydPos    = Base:toLocal(WorldPos) - Rest
+
+        FootZ[Entity:id(),vector] = Rest + vec(0,0,lerp(Z, HydPos:z(), TerrainInfluence))
+
+        local Prev  = Entity["previous",vector]
+        local Delta = HydPos - Prev
+    
+        local OvershootPos = HydPos + Delta * OvershootMul
+        
+        Entity["previous",vector] = HydPos
+            
+        #X
+        Entity:setLength(1, (LenX:distance(OvershootPos)))
+        Entity:setLength(2, ((-LenX):distance(OvershootPos)))
+            
+        #Y
+        Entity:setLength(3, (LenY:distance(OvershootPos)))
+        Entity:setLength(4, ((-LenY):distance(OvershootPos)))
+            
+        #Z
+        Entity:setLength(5, (LenZ:distance(OvershootPos)))
+        Entity:setLength(6, ((-LenZ):distance(OvershootPos)))
+        
+        if(Heavy)
+        {
+            #X
+            Entity:setLength(7, (LenX:distance(OvershootPos)))
+            Entity:setLength(8, ((-LenX):distance(OvershootPos)))
+                
+            #Y
+            Entity:setLength(9, (LenY:distance(OvershootPos)))
+            Entity:setLength(10, ((-LenY):distance(OvershootPos)))
+                
+            #Z
+            Entity:setLength(11, (LenZ:distance(OvershootPos)))
+            Entity:setLength(12, ((-LenZ):distance(OvershootPos)))
+        }
+    }
+    Deviation = AverageDist:average()
+}
+
+function vector linearClamp(MovementVector:vector, Current:vector, Adjusted:vector, StepMod:number, Dir:number)
+{
+    local Target = MovementVector*Dir
+            
+    local TargetDir  = Target - Current 
+    local AdjustedDir = Current - Adjusted
+        
+    local A = TargetDir:dot(TargetDir)
+    if (A > 0) { 
+        local B    = 2 * TargetDir:dot(AdjustedDir)
+        local C    = AdjustedDir:dot(AdjustedDir) - StepMod^2
+        local Disc = max(B*B - 4*A*C, 0)
+        
+        local T2 = (-B + sqrt(Disc)) / (2 * A)
+        T2 = clamp(T2, 0, 1)
+        
+        return Current + TargetDir * T2
+    }
+    return Target
+}
+
+function vector projectedClamp(MovementVector:vector, Adjusted:vector, StepMod:number, Dir:number)
+{
+    local Target = MovementVector * Dir
+
+    local TargetDir = Target - Adjusted
+    local Distance = TargetDir:length()
+
+    return (Distance <= StepMod) ? Target : Adjusted + TargetDir * (StepMod / Distance)
+}
+
+function void dorope(Entity:entity,OnDeath:number,Mode:number)
+{
+    if(Mode|OnDeath)
+    {
+        if (!Entity["roped",number]|OnDeath)
+        {
+            local Rest = Entity["rest",vector]
+            Entity:constraintBreak("rope",Base)
+            local Anchor  = Base:toWorld(Rest:setZ(0))
+                
+            local CurrentDist = Entity:pos():distance(Anchor)
+            local DesiredDist = Base:toWorld(Rest + vec(0,0,-MinFootHeight)):distance(Anchor)
+                
+            local RopeAddDist = max(DesiredDist - CurrentDist, 0)
+                
+            rope(20, Entity, vec(0), Base, Rest:setZ(0), RopeAddDist, 0, "", 0)
+                
+            for (I = 1, 6+(6*Heavy))
+            {
+                Entity:setConstant(I, Constant/10, Damping/10)
+            }
+            Entity["roped",number] = 1
+        }
+    }
+    else
+    {
+        if(Entity["roped",number])
+        {
+            Entity:constraintBreak("rope",Base)
+            for (I = 1, 6)
+            {
+                Entity:setConstant(I,Constant,Damping)
+            }
+            Entity["roped",number] = 0
+        }
+    }
+}
+
+
+#Main()
+timer("run", Interval, -1, function() { 
+    
+    precomputeLocalization()
+    
+    local W = Pod["W",number]
+    local A = Pod["A",number]
+    local S = Pod["S",number]
+    local D = Pod["D",number]
+    local Shift = ((W | A | (MouseControl & (S | D))) & Pod["Shift",number]) ? SprintUpMul : -SprintDownMul
+    local Active = Pod["Active",number]
+    local Crouch = !Throttle ? (Active ? Pod["Duck",number] : 1) : 0
+    
+    CrouchVal = clamp(CrouchVal + CrouchSpeed*(Crouch - !Crouch), 0, 1)
+    local CrouchInverse = (1-CrouchVal)
+    
+    local CamAng = MouseControl ? Base:toLocal(Cam["CamAng",angle]) : ang(0, TurnSpeed*(A-D)*CrouchInverse, 0)
+    local YawTarget = Active ? clamp(CamAng:yaw(), -TurnSpeed*CrouchInverse, TurnSpeed*CrouchInverse) : 0
+    Yaw = lerp(Yaw, YawTarget, lerp(1, SprintTurnInertia, Throttle))
+    
+    local PitchTarget = (!Crouch & !PitchWhilstCrouched) ? clamp(MousePitchControl ? CamAng:pitch() : 0, -PitchMax, PitchMin) : IdlePitchTarget
+    Pitch += clamp(PitchTarget - Pitch, -PitchSpeed, PitchSpeed)
+    
+    LastMoveDir = lerp(LastMoveDir,(MouseControl ? vec(W-S,A-D,0) : vec(W-S,0,0)):normalized(),lerp(1, SprintInertia, Throttle))
+    
+    local TurnInPlace = (abs(Yaw) > TurnLimit) & !(W | S | ((A | D) & MouseControl)) ? 1 : 0
+    
+    local MovementVector = TurnInPlace ? vec(0) : LastMoveDir:rotateAroundAxis(vec(0,0,1),Yaw)*CrouchInverse*DirMul
+    
+    local StepMod = StepLength * lerp(1,SprintLengthMul,Throttle)
+    
+    MovementVector *= StepMod
+    
+    if (Deviation < Diff)
+    {
+        local Colour = 0
+        local LeadingDist = -1
+        
+        local BaseAverage = 0
+        foreach(_:number, Entity:entity = Entities)
+        {
+            local Rest = Entity["rest", vector]
+            local Current = toLocalYaw(Entity:pos())-Rest
+            
+            local LocalMovement = TurnInPlace ? Rest:rotateAroundAxis(vec(0,0,1),clamp(Yaw, -StillTurnAngle, StillTurnAngle))-Rest : MovementVector
+            
+            local Dist = Current:distance(LocalMovement)
+            if (Dist > LeadingDist)
+            {
+                Colour = Entity["colour",number]
+                LeadingDist = Dist
+            }
+            BaseAverage += Entity:pos():z()
+        }
+        local BaseGround = (BaseAverage/Entities:count())-(CrouchHeight*CrouchVal)
+        
+        foreach(_:number, Entity:entity = Entities)
+        {
+            local Dir = Colour == Entity["colour",number] ? 1 : -1
+            local Sub = Entity["substep",number] = Dir == -1 ? Entity["substep",number] + 1 : 0
+            
+            local Current = Entity["current",vector]
+            local Adjusted = Entity["adjusted",vector]
+            local Rest = Entity["rest",vector]
+            Entity["liftMod",number] = CrouchInverse
+            Entity["start",vector] = Current
+            Entity["lead",number] = max(Dir,0)
+            
+            local Scale = (Dir == -1 ? (1 / (ChromaticNumber-1))*Sub : 1)
+            local LocalMovement = TurnInPlace? Rest:rotateAroundAxis(vec(0,0,1), clamp(Yaw, -StillTurnAngle, StillTurnAngle)) - Rest : MovementVector * vec(Scale, 1, Scale)
+            
+            local Target = LinearRadius ? linearClamp(LocalMovement, Current, Adjusted, StepMod, Dir) : projectedClamp(LocalMovement, Adjusted, StepMod, Dir)
+            
+            local InitialPos = toWorldYaw(Rest:setZ(0))
+            
+            local WalkPos = toWorldYaw(Target + Rest)
+            Initial = rangerOffsetHull(Entity, InitialPos, WalkPos)
+            
+            if(!Initial:hit())
+            {
+                Initial = rangerOffsetHull(Entity, Initial:pos(), toWorldYaw(Rest + vec(0,0,-MinFootHeight)))
+            }
+            
+            dorope(Entity,0,Initial:hit() ? 0 : 1)
+            
+            local Hit = Initial:pos()
+            local G = toLocalYaw(Hit) - Rest
+            local Dz = clamp(Hit:z() - BaseGround,-MinFootHeight,MaxFootHeight)
+            local NewGoal = G:setZ(Dz)
+            
+            local Dist = Current:distance(NewGoal)
+            local DistNorm = Dist / StepMod
+            
+            Entity["speed",number] = (TurnInPlace ? StillTurnSpeed * DistNorm : Speed * DistNorm * lerp(1,SprintSpeedMul,Throttle))*(1-WaterMul*Entity:isUnderWater())
+            
+            Entity["distance",number] = Dist
+            Entity["goal",vector] = NewGoal
+        }
+        
+        Throttle = clamp(Throttle + SprintStates*Shift,0,1)
+    }
+    
+    advance()
+
+    local TargetLoad = clamp(Base:vel():length() / MaxSpeed, 0, 1)
+
+    EngineLoad = lerp(EngineLoad, TargetLoad, 0.1)
+    PitchVariation = clamp(PitchVariation + randint(-2, 2),-10,10)
+    local EnginePitch = BasePitch + PitchRange * EngineLoad
+
+    soundVolume(1, SoundVolume*Active)
+    soundPitch(1, EnginePitch)
+
+    local Center = vec(0)
+    local Count = Entities:count()
+
+    foreach(_:number, E:entity = Entities)
+    {
+        local P = E["test",vector]
+        Center += P
+    }
+
+    Center /= Count
+
+    local SumXX = 0
+    local SumXZ = 0
+    local SumYY = 0
+    local SumYZ = 0
+
+    foreach(_:number, Vec:vector = FootZ)
+    {
+        local Dir = Vec - Center
+
+        local X = Dir:x()
+        local Y = Dir:y()
+        local Z = Dir:z()
+
+        SumXX += X * X
+        SumXZ += X * Z
+
+        SumYY += Y * Y
+        SumYZ += Y * Z
+    }
+
+    local SlopeX = (SumXX != 0) ? (SumXZ / SumXX) : 0
+    local SlopeY = (SumYY != 0) ? (SumYZ / SumYY) : 0
+
+    local Ang = ((ang(-atan(SlopeX),0,atan(SlopeY)) * TiltInfluence)+ang(Pitch, 0, 0)) - Base:angles()
+
+    Base:applyAngForce(ang(Ang:pitch()*BaseForce, Yaw*BaseForce, Ang:roll()*BaseForce)- Base:angVel()*AngVelDamp)
+    while(perf() & StepQueue:count())
+    {
+        local Entity = StepQueue:shiftEntity()
+        local ID = Entity:id()
+        
+        #You can remove the below randomization and add your own step sound here, if you want
+        Num = randint(1, Stepsounds:count())
+                        
+        Entity:soundPlay(ID,0,Stepsounds[Num,string])
+        soundPitch(ID,StepPitch)
+        soundVolume(ID,StepVol)
+    }
+})
+timerPause("run")
+
+event entityCollision(Entity:entity, HitEntity:entity, CollisionData:collision)
+{
+    if (Entity["soundcooldown",number] < curtime() & CollisionData:speed() > 10)
+    {
+        Entity["soundcooldown",number] = curtime()+StepCooldown
+        StepQueue:pushEntity(Entity)
+    }
+}
+
+function number isBalanced()
+{
+    local Center = vec(0)
+    local Radius = 0
+    local Num = 0
+
+    foreach(_:number, E:entity = Entities)
+    {
+        local Adjusted  = E["adjusted",vector]
+        local XY = Adjusted:setZ(0)
+
+        Center += XY
+        local Len = XY:length()
+        Radius = max(Radius,Len)
+
+        Num += 1
+    }
+
+    Center /= Num
+    local Dist = Center:length()
+
+    local Ratio = Dist / Radius
+
+    return (Ratio < StabilityRatio)
+}
+
+event entityRemoved(Entity:entity)
+{
+    local RemovedId = LegEntities:indexOf(Entity)
+    
+    if(RemovedId)
+    {
+        local FootEnt = Entity["parent",entity]
+        local PastBreak = 0
+        FootEnt:constraintBreak(Base)
+        
+        foreach(_:number, E:entity = FootEnt["legEnts",array])
+        {
+            local ConstraintsArray = E:getConnectedEntities(E:children())
+            local Next = E["next",entity]
+            local Prev = E["prev",entity]
+            foreach(_:number, E2:entity = ConstraintsArray)
+            {
+                if((E2 != Prev) & (E2 != Next))
+                {
+                    E:constraintBreak(E2)
+                }
+            }
+            if(Prev == Entity)
+            {
+                PastBreak = 1
+                FootEnt["legEnts",array]:remove(FootEnt["legEnts",array]:indexOf(E))
+            }
+            if(!PastBreak)
+            {
+                E["mainparent",entity] = FootEnt
+            }
+            LegEntities:remove(LegEntities:indexOf(E))
+        }
+        RemovedId = Entity["parentId",number]
+        Entity = FootEnt
+    }
+    else
+    {
+        RemovedId = Entities:indexOf(Entity)
+    }
+    
+    if(RemovedId)
+    {   
+        Entities:removeEntity(Entities:indexOf(Entity))
+        Feet = Entities:count()
+        
+        local Remap = table()
+        foreach(Id:number, E:entity = Entities)
+        {
+            Remap[E["id",number],number] = E["id",number] = Id
+        }
+        
+        foreach(_:number, N:number = Entity["neighbours",array])
+        {
+            local E = Entities[Remap[N,number],entity]
+            local Merged = E["neighbours",array]:add(Entity["neighbours",array])
+            local Seen = table()
+            Seen[N,number] = 1
+            Seen[RemovedId,number] = 1
+            E["neighbours",array] = array()
+            foreach(_:number, N2:number = Merged)
+            {
+                if(!Seen[N2,number])
+                {
+                    Seen[N2,number] = 1
+                    E["neighbours",array]:pushNumber(Remap[N2,number])
+                }
+            }
+        }
+        
+        dSatur()
+        
+        local Rest = Entity["rest",vector]
+        FootZ[Entity:id(),vector] = Rest-vec(0,0,MinFootHeight)
+        
+        foreach(_:number, LegEnt:entity = Entity["legEnts",array])
+        {
+            LegEnt:propInertia(vec(25))
+        }
+        
+        local Ratio = (Feet/OriginalAmount)
+        Speed *= Ratio
+        TurnSpeed *= Ratio
+        StillTurnSpeed *= Ratio
+        SprintSpeedMul *= Ratio
+        SprintLengthMul *= Ratio
+        
+        if (Feet <= OriginalAmount/2 || !isBalanced())
+        {
+            BaseForce = 0
+            AngVelDamp = 0
+            TurnSpeed = 0
+                
+            foreach(_:number, E:entity = Entities)
+            {
+                E:constraintBreak(Base)
+                E:propInertia(vec(25))
+                foreach(_:number, LegEnt:entity = E["legEnts",array])
+                {
+                    LegEnt:propInertia(vec(25))
+                }
+                dorope(E,1,1)
+            }
+             
+            Base:propInertia(vec(200))
+        }
+    }
+}
