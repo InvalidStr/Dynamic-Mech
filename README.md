@@ -26,6 +26,7 @@ Got any questions? You can find me on both the [ACF](https://discord.gg/jf4cwarP
 ### Known issues
 Two-legged mechs that have one leg fall off a ledge won't be able to move. As a workaround, try to turn to either push the mech off the ledge, or get the hanging leg back up on the ledge again.
 
+Missing event *event entityRemoved*. Happens on some servers (and with some people). Wiremod is outdated, lobby for the server owner to update it.
 
 ### All currently usable variables (also found in the E2)
 **ConstrainAfterSpawn** - Should constraints be remade after the initial load? Also moves the base and the props into their respective positions. Set this to 1 whenever you change something about the setup
