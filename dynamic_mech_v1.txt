@@ -779,7 +779,7 @@ timer("run", Interval, -1, function() {
 
     foreach(_:number, E:entity = Entities)
     {
-        local P = E["test",vector]
+        local P = FootZ[E:id(),vector]
         Center += P
     }
 
