@@ -12,10 +12,11 @@ Thank you to **H4NK_7457**, **Octo** and **ChogChey** for helping me test the ch
 A mech needs a few basic things:
   * A Base
   * A number of feet
-  * A Pod controller
-  * A cam controller
+  * A cam controller (Though not wired to the E2)
 
-Spawn in all of these and wire them up to the E2 as appropriate. Reload the E2 with the *ConstrainAfterSpawn* var set to 1, or dupe it to make it set itself up. The E2 expects a base oriented to ang(0,90,0) and will actively reorient the base to this facing.
+Spawn in all of these and wire them up to the E2 where appropriate. Reload the E2 with the *ConstrainAfterSpawn* var set to 1, or dupe it to make it set itself up. The E2 expects a base oriented to ang(0,90,0) and will actively reorient the base to this facing.
+
+A Cam controller is required in the built to make turning work properly, but this does not have to be linked to the dynmech E2 in any way.
 
 Make the feet spherical using [Makespherical](https://steamcommunity.com/sharedfiles/filedetails/?id=136318146). Doing this lets the mech traverse adverse terrain better than flat feet. This is not strictly required, but i recommend it.
 
@@ -25,6 +26,22 @@ Got any questions? You can find me on both the [ACF](https://discord.gg/jf4cwarP
 
 
 ### Controls
+All the controls in the mech are rebindable in the E2, these can be set by using these variables:
+
+**ForwardKey**
+
+**BackwardKey**
+
+**LeftKey**
+
+**RightKey**
+
+**sprintKey**
+
+**CrouchKey**
+
+Note that any assignment has to be lowercase
+
 The basic controls are:
 
 **W and S** - Backwards and forwards
@@ -45,6 +62,18 @@ Missing event *event entityRemoved*. Happens on some servers (and with some peop
 
 ### All currently usable variables (also found in the E2)
 **ConstrainAfterSpawn** - Should constraints be remade after the initial load? Also moves the base and the props into their respective positions. Set this to 1 whenever you change something about the setup
+
+**ForwardKey** - The key that makes the mech go forward
+
+**BackwardKey** - The key that makes the mech go backward
+
+**LeftKey** - The key that makes the mech go/turn left
+
+**RightKey** - The key that makes the mech go/turn right
+
+**sprintKey** - The key that makes the mech sprint
+
+**CrouchKey** - The key that makes the mech crouch
 
 **Length** - Hydraulic length, generally don't touch
 
@@ -137,12 +166,6 @@ Missing event *event entityRemoved*. Happens on some servers (and with some peop
 **AngVelDamp** - Damping of the keep upright/turn applyAngForce (Shamelessly stolen from Meta)
 
 **StabilityRatio** - How close to the center/base positon the centroid of the feet has to be before the mech is considered dead. Only runs on foot/leg destruction
-
-**Campos** - Position of the camera, relative to the base
-
-**ZoomMin** - How close to the mech the camera is when zoomed in
-
-**ZoomMax** - How close to the mech the camera is when zoomed out
 
 **Interval** - Interval of the chip. 1/10 is a nice responsive middle ground with good performance. You can play around with this if you want better performance
 
