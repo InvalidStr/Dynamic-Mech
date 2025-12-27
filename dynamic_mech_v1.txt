@@ -2,14 +2,16 @@
 #Thank you to H4NK_7457, Octo and ChogChey for helping me test the chip as it evolved
 
 @name Dynamic Mech V1
-@inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Pod Cam]:wirelink [CycleZoom]:number
-@outputs [Throttle]:number [Filter]:array
-@persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio ZoomMin ZoomMax Interval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchVal Yaw Zoom Feet OriginalAmount Deviation ChromaticNumber]:number
+@inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Seat]:entity
+@outputs [Throttle Active]:number [Filter]:array
+@persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber]:number
 @persist [DirMul LenX LenY LenZ LastMoveDir]:vector
-@persist [EngineSound]:string
+@persist [ForwardKey BackwardKey LeftKey RightKey SprintKey CrouchKey EngineSound]:string
+@persist [Driver]:entity
 @persist [Entities LegEntities StepQueue]:array
-@persist [Local FootZ Stepsounds]:table 
-@trigger CycleZoom
+@persist [Local FootZ Stepsounds]:table
+@persist [Forward Backward Left Right Sprint Crouch]:number
+@trigger none
 
 
 #I wish this didn't have to be here
@@ -75,7 +77,15 @@ function void addStepSound(Id:number, S:string)
 #Variables the user should be touching (mostly)
 if (first()|dupefinished())
 { 
-    ConstrainAfterSpawn = 0 #Should constraints be remade after the initial load? Also moves the base and the props into their respective positions. Set this to 1 whenever you change something about the setup
+    ConstrainAfterSpawn = 0 #Should constraints be remade after the initial load? Also moves the base and the props into their respective positions
+    
+    #Keybinds, all lowercase
+    ForwardKey          = "w"
+    BackwardKey         = "s"
+    LeftKey             = "a"
+    RightKey            = "d" 
+    SprintKey           = "lshift"
+    CrouchKey           = "lcontrol"
     
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
 #Syntax for adding a foot to the system:
@@ -168,10 +178,6 @@ if (first()|dupefinished())
     
     StabilityRatio      = 0.4 #How close to the center/base positon the centroid of the feet has to be before the mech is considered dead. Only runs on foot/leg destruction
     
-    Campos              = vec(0,0,40) #Position of the camera, relative to the base
-    ZoomMin             = 50 #How close to the mech the camera is when zoomed in
-    ZoomMax             = 150 #How close to the mech the camera is when zoomed out
-        
     Interval            = 1/10 #Interval of the chip. 1/10 is a nice responsive middle ground with good performance. You can play around with this if you want better performance
     
     #Add step sounds, formating is addStepSound(Id (sequential, rising), string sound). If you add more than one it will randomly pick one when stepping
@@ -196,18 +202,14 @@ if (first()|dupefinished())
     LenY = vec(0,Length,0)
     LenZ = vec(0,0,Length)
     
-    Throttle = Pitch = EngineLoad = PitchVariation = CrouchVal = Yaw = Pitch = 0
+    Driver = _NO_ENTITY
+    
+    Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = 0
     
     Base:setMass(BaseMass)
     Base:propInertia(vec(BaseInertia))
     
     LastMoveDir = vec(0)
-    
-    Cam["Position",vector] = Campos
-    Cam["Distance",number] = Zoom = ZoomMax
-    Cam["FOV",number] = 90
-    Cam["Parent",entity] = Base
-    Cam["Activated",number] = 1
     
     Base:soundPlay(1,0,EngineSound)
     soundPitch(1,BasePitch)
@@ -217,11 +219,6 @@ if (first()|dupefinished())
     Local = table()
     
     Feet = OriginalAmount = Entities:count()
-}
-else
-{
-    Cam["Distance",number] = Zoom = ((~CycleZoom) & CycleZoom) ? (Zoom > ZoomMin) ? ZoomMin : ZoomMax : Zoom
-    exit()
 }
 
 #Venture below at your own risk
@@ -490,7 +487,7 @@ timer("constraints", 0.1, function() {
         }
     }
 
-    Cam["FilterEntities",array] = Filter = BaseEnts
+    Filter = BaseEnts
     Base["constrained",number] = 1
     timerResume("run")
 })
@@ -666,27 +663,25 @@ timer("run", Interval, -1, function() {
     
     precomputeLocalization()
     
-    local W = Pod["W",number]
-    local A = Pod["A",number]
-    local S = Pod["S",number]
-    local D = Pod["D",number]
-    local Shift = ((W | A | (MouseControl & (S | D))) & Pod["Shift",number]) ? SprintUpMul : -SprintDownMul
-    local Active = Pod["Active",number]
-    local Crouch = !Throttle ? (Active ? Pod["Duck",number] : 1) : 0
+    Driver = changed(Seat:driver()) ? Seat:driver() : Driver
+    Active = Driver:isValid()
+
+    local SprintVal = ((Forward | Backward | (MouseControl & (Left | Right))) & Sprint) ? SprintUpMul : -SprintDownMul
+    local CrouchVal = !Throttle ? (Active ? Crouch : 1) : 0
     
-    CrouchVal = clamp(CrouchVal + CrouchSpeed*(Crouch - !Crouch), 0, 1)
-    local CrouchInverse = (1-CrouchVal)
+    CrouchPersist = clamp(CrouchPersist + CrouchSpeed*(CrouchVal - !CrouchVal), 0, 1)
+    local CrouchInverse = (1-CrouchPersist)
     
-    local CamAng = MouseControl ? Base:toLocal(Cam["CamAng",angle]) : ang(0, TurnSpeed*(A-D)*CrouchInverse, 0)
+    local CamAng = MouseControl ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
     local YawTarget = Active ? clamp(CamAng:yaw(), -TurnSpeed*CrouchInverse, TurnSpeed*CrouchInverse) : 0
     Yaw = lerp(Yaw, YawTarget, lerp(1, SprintTurnInertia, Throttle))
     
-    local PitchTarget = (!Crouch & !PitchWhilstCrouched) ? clamp(MousePitchControl ? CamAng:pitch() : 0, -PitchMax, PitchMin) : IdlePitchTarget
+    local PitchTarget = (!CrouchPersist & !PitchWhilstCrouched) ? clamp(MousePitchControl ? CamAng:pitch() : 0, -PitchMax, PitchMin) : IdlePitchTarget
     Pitch += clamp(PitchTarget - Pitch, -PitchSpeed, PitchSpeed)
     
-    LastMoveDir = lerp(LastMoveDir,(MouseControl ? vec(W-S,A-D,0) : vec(W-S,0,0)):normalized(),lerp(1, SprintInertia, Throttle))
+    LastMoveDir = lerp(LastMoveDir,(MouseControl ? vec(Forward-Backward,Left-Right,0) : vec(Forward-Backward,0,0)):normalized(),lerp(1, SprintInertia, Throttle))
     
-    local TurnInPlace = (abs(Yaw) > TurnLimit) & !(W | S | ((A | D) & MouseControl)) ? 1 : 0
+    local TurnInPlace = (abs(Yaw) > TurnLimit) & !(Forward | Backward | ((Left | Right) & MouseControl)) ? 1 : 0
     
     local MovementVector = TurnInPlace ? vec(0) : LastMoveDir:rotateAroundAxis(vec(0,0,1),Yaw)*CrouchInverse*DirMul
     
@@ -715,7 +710,7 @@ timer("run", Interval, -1, function() {
             }
             BaseAverage += Entity:pos():z()
         }
-        local BaseGround = (BaseAverage/Entities:count())-(CrouchHeight*CrouchVal)
+        local BaseGround = (BaseAverage/Entities:count())-(CrouchHeight*CrouchPersist)
         
         foreach(_:number, Entity:entity = Entities)
         {
@@ -760,7 +755,7 @@ timer("run", Interval, -1, function() {
             Entity["goal",vector] = NewGoal
         }
         
-        Throttle = clamp(Throttle + SprintStates*Shift,0,1)
+        Throttle = clamp(Throttle + SprintStates*SprintVal,0,1)
     }
     
     advance()
@@ -967,5 +962,17 @@ event entityRemoved(Entity:entity)
              
             Base:propInertia(vec(200))
         }
+    }
+}
+
+event keyPressed(Player:entity, Key:string, Down:number, KeyBind:string) {
+    if(Player == Driver)
+    {
+        Forward = Key == ForwardKey ? Down : Forward
+        Backward = Key == BackwardKey ? Down : Backward
+        Left = Key == LeftKey ? Down : Left
+        Right = Key == RightKey ? Down : Right
+        Sprint = Key == SprintKey ? Down : Sprint
+        Crouch = Key == CrouchKey ? Down : Crouch
     }
 }
