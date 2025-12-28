@@ -16,7 +16,7 @@ A mech needs a few basic things:
 
 Spawn in all of these and wire them up to the E2 where appropriate. Reload the E2 with the *ConstrainAfterSpawn* var set to 1, or dupe it to make it set itself up. The E2 expects a base oriented to ang(0,90,0) and will actively reorient the base to this facing.
 
-A Cam controller is required in the built to make turning work properly, but this does not have to be linked to the dynmech E2 in any way.
+A Cam controller is required in the build to make mouse turning work properly, but this does not have to be linked to the dynmech E2 in any way.
 
 Make the feet spherical using [Makespherical](https://steamcommunity.com/sharedfiles/filedetails/?id=136318146). Doing this lets the mech traverse adverse terrain better than flat feet. This is not strictly required, but i recommend it.
 
@@ -40,6 +40,10 @@ All the controls in the mech are rebindable in the E2, these can be set by using
 
 **CrouchKey**
 
+**FreelookKey**
+
+**MouseToggleKey**
+
 Note that any assignment has to be lowercase
 
 The basic controls are:
@@ -52,7 +56,7 @@ The basic controls are:
 
 **Control** - The crouch key
 
-(Wireable) **Cycle Zoom** - Cycles the zoom between the two zoom levels. I typically put his on Mouse 2.
+**Left alt** - The freelook key
 
 
 ### Known issues
@@ -74,6 +78,10 @@ Missing event *event entityRemoved*. Happens on some servers (and with some peop
 **sprintKey** - The key that makes the mech sprint
 
 **CrouchKey** - The key that makes the mech crouch
+
+**FreelookKey** - The key that lets you freelook in mouse aim mode
+
+**MouseToggleKey**
 
 **Length** - Hydraulic length, generally don't touch
 
