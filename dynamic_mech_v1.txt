@@ -674,7 +674,7 @@ timer("run", Interval, -1, function() {
     CrouchPersist = clamp(CrouchPersist + CrouchSpeed*(CrouchVal - !CrouchVal), 0, 1)
     local CrouchInverse = (1-CrouchPersist)
     
-    local CamAng = MouseControl ? Base:toLocal(Driver:eyeAnglesVehicle())*ang(1,!Freelook,1) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
+    local CamAng = MouseControl ? !Freelook ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(Pitch,0,0) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
     local YawTarget = Active ? clamp(CamAng:yaw(), -TurnSpeed*CrouchInverse, TurnSpeed*CrouchInverse) : 0
     Yaw = lerp(Yaw, YawTarget, lerp(1, SprintTurnInertia, Throttle))
     
