@@ -6,11 +6,11 @@
 @outputs [Throttle Active]:number [Filter]:array
 @persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber]:number
 @persist [DirMul LenX LenY LenZ LastMoveDir]:vector
-@persist [ForwardKey BackwardKey LeftKey RightKey SprintKey CrouchKey EngineSound]:string
+@persist [ForwardKey BackwardKey LeftKey RightKey SprintKey CrouchKey FreelookKey MouseToggleKey EngineSound]:string
 @persist [Driver]:entity
 @persist [Entities LegEntities StepQueue]:array
 @persist [Local FootZ Stepsounds]:table
-@persist [Forward Backward Left Right Sprint Crouch]:number
+@persist [Forward Backward Left Right Sprint Crouch Freelook]:number
 @trigger none
 
 
@@ -86,6 +86,8 @@ if (first()|dupefinished())
     RightKey            = "d" 
     SprintKey           = "lshift"
     CrouchKey           = "lcontrol"
+    FreelookKey         = "lalt"
+    MouseToggleKey      = ""
     
 #--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------#
 #Syntax for adding a foot to the system:
@@ -204,7 +206,7 @@ if (first()|dupefinished())
     
     Driver = _NO_ENTITY
     
-    Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = 0
+    Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = Freelook = 0
     
     Base:setMass(BaseMass)
     Base:propInertia(vec(BaseInertia))
@@ -672,7 +674,7 @@ timer("run", Interval, -1, function() {
     CrouchPersist = clamp(CrouchPersist + CrouchSpeed*(CrouchVal - !CrouchVal), 0, 1)
     local CrouchInverse = (1-CrouchPersist)
     
-    local CamAng = MouseControl ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
+    local CamAng = MouseControl ? (!Freelook ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(0)) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
     local YawTarget = Active ? clamp(CamAng:yaw(), -TurnSpeed*CrouchInverse, TurnSpeed*CrouchInverse) : 0
     Yaw = lerp(Yaw, YawTarget, lerp(1, SprintTurnInertia, Throttle))
     
@@ -974,5 +976,7 @@ event keyPressed(Player:entity, Key:string, Down:number, KeyBind:string) {
         Right = Key == RightKey ? Down : Right
         Sprint = Key == SprintKey ? Down : Sprint
         Crouch = Key == CrouchKey ? Down : Crouch
+        Freelook = Key == FreelookKey ? Down : Freelook
+        MouseControl = (Key == MouseToggleKey & Down) ? !MouseControl : MouseControl
     }
 }
