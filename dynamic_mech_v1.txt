@@ -541,7 +541,8 @@ function void advance()
             
         Entity["current",vector] = MovePos
 
-        local Z = Lead ? (Distance > Diff) ? StepHeight *LiftMod * sinr(clamp(((Target - Current):length() / Diff), 0, 1) * (_PI * 0.5)) : 0 : -lerp(0, PushDown, clamp((Distance - Dist) / Distance, 0, 1))
+        local Distance2D = (Target - Current):setZ(0):length()
+        local Z = Lead ? ((Distance > Diff) & (Distance2D > 0.1)) * (StepHeight * LiftMod * sinr(clamp(Distance2D / Diff, 0, 1) * (_PI * 0.5))) : -lerp(0, PushDown, clamp((Distance - Dist) / Distance, 0, 1))
         MovePos += vec(0,0,Z)
         
         local Dir = Target - Start
