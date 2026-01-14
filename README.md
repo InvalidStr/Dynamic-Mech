@@ -177,6 +177,10 @@ Missing event *event entityRemoved*. Happens on some servers (and with some peop
 
 **Interval** - Interval of the chip. 1/10 is a nice responsive middle ground with good performance. You can play around with this if you want better performance
 
+**CripplePercent** - At which percentage of health should a leg part start impacting mobility?
+
+**CrippleInterval** - How often should the chip check for leg damage (in seconds)
+
 **StepVol** - Volume of the step
 
 **StepPitch** - Pitch of the step
