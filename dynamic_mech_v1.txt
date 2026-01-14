@@ -4,13 +4,14 @@
 @name Dynamic Mech V1
 @inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Seat]:entity
 @outputs [Throttle Active]:number [Filter]:array
-@persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber]:number
+@persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval CripplePercent CrippleInterval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber Crippled TurnSpeedModified Stepping]:number
 @persist [DirMul LenX LenY LenZ LastMoveDir]:vector
-@persist [ForwardKey BackwardKey LeftKey RightKey SprintKey CrouchKey FreelookKey MouseToggleKey EngineSound]:string
+@persist [EngineSound]:string
 @persist [Driver]:entity
 @persist [Entities LegEntities StepQueue]:array
 @persist [Local FootZ Stepsounds]:table
 @persist [Forward Backward Left Right Sprint Crouch Freelook]:number
+@persist [ForwardKey BackwardKey LeftKey RightKey SprintKey CrouchKey FreelookKey MouseToggleKey]:string
 @trigger none
 
 
@@ -39,6 +40,7 @@ function void addFoot(E:entity, R:vector, Id:number, Neigh:array, LegPieces:arra
     E["distance",number] = 0
     E["legEnts",array] = LegPieces
     E["roped",number] = 0
+    E["health",number] = 1
     
     FootZ[E:id(),vector] = R
     
@@ -61,7 +63,13 @@ function void addFoot(E:entity, R:vector, Id:number, Neigh:array, LegPieces:arra
         {
             Piece["next",entity] = Base
         }
+        elseif (PieceId == 1)
+        {
+            E["next",entity] = Piece
+            E["prev",entity] = Base
+        }
     }
+    
 } 
 
 function void addStepSound(Id:number, S:string)
@@ -182,6 +190,9 @@ if (first()|dupefinished())
     
     Interval            = 1/10 #Interval of the chip. 1/10 is a nice responsive middle ground with good performance. You can play around with this if you want better performance
     
+    CripplePercent      = 0.3 #At which percentage of health should a leg part start impacting mobility?
+    CrippleInterval     = 2.5 #How often should the chip check for leg damage (in seconds)
+    
     #Add step sounds, formating is addStepSound(Id (sequential, rising), string sound). If you add more than one it will randomly pick one when stepping
     addStepSound(1,"npc/dog/dog_footstep1.wav")
     addStepSound(2,"npc/dog/dog_footstep2.wav")
@@ -192,7 +203,7 @@ if (first()|dupefinished())
     
     EngineSound         = "acf_extra/vehiclefx/idle/diesel7.wav" #Which sound will be used for the mech engine sounds
     SoundVolume         = 1 #Engine volume
-    BasePitch           = 80 #What pitch will the engine be at when idle
+    BasePitch           = 60 #What pitch will the engine be at when idle
     PitchRange          = 60 #How far can the pitch move when moving
     MaxSpeed            = 200 #At which speed do you see the highest pitch
     
@@ -206,7 +217,9 @@ if (first()|dupefinished())
     
     Driver = _NO_ENTITY
     
-    Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = Freelook = 0
+    TurnSpeedModified = TurnSpeed
+    
+    Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = Freelook = Crippled = 0
     
     Base:setMass(BaseMass)
     Base:propInertia(vec(BaseInertia))
@@ -492,6 +505,7 @@ timer("constraints", 0.1, function() {
     Filter = BaseEnts
     Base["constrained",number] = 1
     timerResume("run")
+    timerResume("cripplecheck")
 })
 timerPause("constraints")
 timerResume("initial")
@@ -520,6 +534,7 @@ function vector toLocalYaw(V:vector)
 
 function void advance()
 {
+    Stepping = 0
     AverageDist = array()
     foreach(_:number, Entity:entity = Entities)
     {
@@ -531,18 +546,21 @@ function void advance()
         local Rest = Entity["rest",vector]
         local Distance = Entity["distance",number]
         local LiftMod = Entity["liftMod",number]
+        
+        Stepping = Stepping | (Lead & (Distance > Diff))
             
         local Dist = Current:distance(Target)
     
         local Percentage = min(SpeedVal / Dist, 1)
         local MovePos = lerp(Current, Target, Percentage)
-        
+    
         AverageDist:pushNumber(Dist)
             
         Entity["current",vector] = MovePos
 
         local Distance2D = (Target - Current):setZ(0):length()
-        local Z = Lead ? ((Distance > Diff) & (Distance2D > 0.1)) * (StepHeight * LiftMod * sinr(clamp(Distance2D / Diff, 0, 1) * (_PI * 0.5))) : -lerp(0, PushDown, clamp((Distance - Dist) / Distance, 0, 1))
+
+        local Z = Lead ? ((Distance > Diff) & (Distance2D > 0.1)) * (StepHeight * Lead * LiftMod * sinr(clamp(Distance2D / Diff, 0, 1) * (_PI * 0.5))) : -lerp(0, PushDown, clamp((Distance - Dist) / Distance, 0, 1))
         MovePos += vec(0,0,Z)
         
         local Dir = Target - Start
@@ -651,7 +669,7 @@ function void dorope(Entity:entity,OnDeath:number,Mode:number)
         if(Entity["roped",number])
         {
             Entity:constraintBreak("rope",Base)
-            for (I = 1, 6)
+            for (I = 1, 6+(6*Heavy))
             {
                 Entity:setConstant(I,Constant,Damping)
             }
@@ -669,15 +687,16 @@ timer("run", Interval, -1, function() {
     Driver = changed(Seat:driver()) ? Seat:driver() : Driver
     Active = Driver:isValid()
 
-    local SprintVal = ((Forward | Backward | (MouseControl & (Left | Right))) & Sprint) ? SprintUpMul : -SprintDownMul
+    local SprintVal = ((Forward | Backward | (MouseControl & (Left | Right))) & Sprint & !Crippled) ? SprintUpMul : -SprintDownMul
     local CrouchVal = !Throttle ? (Active ? Crouch : 1) : 0
     
     CrouchPersist = clamp(CrouchPersist + CrouchSpeed*(CrouchVal - !CrouchVal), 0, 1)
     local CrouchInverse = (1-CrouchPersist)
     
-    local CamAng = MouseControl ? !Freelook ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(Pitch,0,0) : ang(0, TurnSpeed*(Left-Right)*CrouchInverse, 0)
-    local YawTarget = Active ? clamp(CamAng:yaw(), -TurnSpeed*CrouchInverse, TurnSpeed*CrouchInverse) : 0
-    Yaw = lerp(Yaw, YawTarget, lerp(1, SprintTurnInertia, Throttle))
+    local ScaledTurn = TurnSpeedModified*lerp(1, SprintTurnInertia, Throttle)
+    
+    local CamAng = MouseControl ? !Freelook ? Base:toLocal(Driver:eyeAnglesVehicle()) : ang(Pitch,0,0) : ang(0, ScaledTurn*(Left-Right)*CrouchInverse, 0)
+    Yaw = Active ? clamp(CamAng:yaw(), -ScaledTurn*CrouchInverse, ScaledTurn*CrouchInverse) : 0
     
     local PitchTarget = (!CrouchPersist & !PitchWhilstCrouched) ? clamp(MousePitchControl ? CamAng:pitch() : 0, -PitchMax, PitchMin) : IdlePitchTarget
     Pitch += clamp(PitchTarget - Pitch, -PitchSpeed, PitchSpeed)
@@ -688,7 +707,7 @@ timer("run", Interval, -1, function() {
     
     local MovementVector = TurnInPlace ? vec(0) : LastMoveDir:rotateAroundAxis(vec(0,0,1),Yaw)*CrouchInverse*DirMul
     
-    local StepMod = StepLength * lerp(1,SprintLengthMul,Throttle)
+    local StepMod = StepLength * lerp(1,SprintLengthMul,Throttle) * DirMul:length()
     
     MovementVector *= StepMod
     
@@ -701,7 +720,7 @@ timer("run", Interval, -1, function() {
         foreach(_:number, Entity:entity = Entities)
         {
             local Rest = Entity["rest", vector]
-            local Current = toLocalYaw(Entity:pos())-Rest
+            local Current = Entity["health",number] < 1 ? Entity["current",vector] : toLocalYaw(Entity:pos())-Rest
             
             local LocalMovement = TurnInPlace ? Rest:rotateAroundAxis(vec(0,0,1),clamp(Yaw, -StillTurnAngle, StillTurnAngle))-Rest : MovementVector
             
@@ -717,20 +736,26 @@ timer("run", Interval, -1, function() {
         
         foreach(_:number, Entity:entity = Entities)
         {
+            local Max = max(ChromaticNumber - 1, 1)
+            
             local Dir = Colour == Entity["colour",number] ? 1 : -1
-            local Sub = Entity["substep",number] = Dir == -1 ? Entity["substep",number] + 1 : 0
+            local Sub = Entity["substep",number] = (Dir == -1) ? min(Entity["substep",number] + 1, Max) : 0
+            
+            local CrippleMul = Entity["health",number]
             
             local Current = Entity["current",vector]
             local Adjusted = Entity["adjusted",vector]
             local Rest = Entity["rest",vector]
             Entity["liftMod",number] = CrouchInverse
             Entity["start",vector] = Current
-            Entity["lead",number] = max(Dir,0)
+            Entity["lead",number] = max(Dir*CrippleMul,0)
             
-            local Scale = (Dir == -1 ? (1 / (ChromaticNumber-1))*Sub : 1)
+            local StepModAdjusted = StepMod*CrippleMul
+            
+            local Scale = (Dir == -1) ? (Sub / Max) : 1
             local LocalMovement = TurnInPlace? Rest:rotateAroundAxis(vec(0,0,1), clamp(Yaw, -StillTurnAngle, StillTurnAngle)) - Rest : MovementVector * vec(Scale, 1, Scale)
             
-            local Target = LinearRadius ? linearClamp(LocalMovement, Current, Adjusted, StepMod, Dir) : projectedClamp(LocalMovement, Adjusted, StepMod, Dir)
+            local Target = LinearRadius ? linearClamp(LocalMovement, Current, Adjusted, StepModAdjusted, Dir) : projectedClamp(LocalMovement, Adjusted, StepModAdjusted, Dir)
             
             local InitialPos = toWorldYaw(Rest:setZ(0))
             
@@ -750,7 +775,7 @@ timer("run", Interval, -1, function() {
             local NewGoal = G:setZ(Dz)
             
             local Dist = Current:distance(NewGoal)
-            local DistNorm = Dist / StepMod
+            local DistNorm = Dist / StepModAdjusted
             
             Entity["speed",number] = (TurnInPlace ? StillTurnSpeed * DistNorm : Speed * DistNorm * lerp(1,SprintSpeedMul,Throttle))*(1-WaterMul*Entity:isUnderWater())
             
@@ -773,32 +798,31 @@ timer("run", Interval, -1, function() {
     soundPitch(1, EnginePitch)
 
     local Center = vec(0)
-    local Count = Entities:count()
-
+    local Count  = Entities:count()
+    
     foreach(_:number, E:entity = Entities)
     {
-        local P = FootZ[E:id(),vector]
-        Center += P
+        local Vec = FootZ[E:id(),vector] + vec(0,0, -CrouchHeight*(1 - E["health",number]))
+        Center += Vec
     }
-
     Center /= Count
-
+    
     local SumXX = 0
     local SumXZ = 0
     local SumYY = 0
     local SumYZ = 0
-
-    foreach(_:number, Vec:vector = FootZ)
+    
+    foreach(_:number, E:entity = Entities)
     {
+        local Vec = FootZ[E:id(),vector] + vec(0,0, -CrouchHeight*(1 - E["health",number]))
         local Dir = Vec - Center
-
+    
         local X = Dir:x()
         local Y = Dir:y()
         local Z = Dir:z()
-
+    
         SumXX += X * X
         SumXZ += X * Z
-
         SumYY += Y * Y
         SumYZ += Y * Z
     }
@@ -808,7 +832,7 @@ timer("run", Interval, -1, function() {
 
     local Ang = ((ang(-atan(SlopeX),0,atan(SlopeY)) * TiltInfluence)+ang(Pitch, 0, 0)) - Base:angles()
 
-    Base:applyAngForce(ang(Ang:pitch()*BaseForce, Yaw*BaseForce, Ang:roll()*BaseForce)- Base:angVel()*AngVelDamp)
+    Base:applyAngForce(ang(Ang:pitch()*BaseForce, (Stepping ? Yaw : 0)*BaseForce, Ang:roll()*BaseForce)- Base:angVel()*AngVelDamp)
     while(perf() & StepQueue:count())
     {
         local Entity = StepQueue:shiftEntity()
@@ -823,6 +847,34 @@ timer("run", Interval, -1, function() {
     }
 })
 timerPause("run")
+
+timer("cripplecheck", CrippleInterval, -1, function() {
+    local IsCrippled = Feet == OriginalAmount ? 0 : 1
+    TurnSpeedModified = 0
+    foreach(_:number, Foot:entity = Entities)
+    {
+        local Tmp = 1
+        local Lowest = 1
+        local Next = Foot["next",entity]
+        while(Next != Base)
+        {
+            Lowest = min(Lowest,Next:acfPropHealthPercent())
+            Next = Next["next",entity]
+        }
+        if(Lowest < CripplePercent)
+        {
+            Foot["health",number] = Tmp = 1-clamp((CripplePercent - Lowest) / CripplePercent, 0, 1)
+            IsCrippled = max(Tmp,IsCrippled)
+        }
+        else
+        {
+            Foot["health",number] = 1
+        }
+        TurnSpeedModified += (TurnSpeed/OriginalAmount)*Tmp
+    }
+    Crippled = IsCrippled
+})
+timerPause("cripplecheck")
 
 event entityCollision(Entity:entity, HitEntity:entity, CollisionData:collision)
 {
@@ -938,13 +990,6 @@ event entityRemoved(Entity:entity)
         {
             LegEnt:propInertia(vec(25))
         }
-        
-        local Ratio = (Feet/OriginalAmount)
-        Speed *= Ratio
-        TurnSpeed *= Ratio
-        StillTurnSpeed *= Ratio
-        SprintSpeedMul *= Ratio
-        SprintLengthMul *= Ratio
         
         if (Feet <= OriginalAmount/2 || !isBalanced())
         {
