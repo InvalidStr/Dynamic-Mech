@@ -2,7 +2,7 @@
 #Thank you to H4NK_7457, Octo and ChogChey for helping me test the chip as it evolved
 
 @name Dynamic Mech V1
-@inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Seat]:entity
+@inputs [Base FootL FootR]:entity [Pod]:wirelink [FootLLeg FootRLeg]:array [Seat]:entity #NOTE: Seat is not required if you an ACF base. Skip wiring it up in that case
 @outputs [Throttle Active]:number [Filter]:array
 @persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval CripplePercent CrippleInterval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber Crippled TurnSpeedModified Stepping]:number
 @persist [DirMul LenX LenY LenZ LastMoveDir]:vector
@@ -214,8 +214,6 @@ if (first()|dupefinished())
     LenX = vec(Length,0,0)
     LenY = vec(0,Length,0)
     LenZ = vec(0,0,Length)
-    
-    Driver = _NO_ENTITY
     
     TurnSpeedModified = TurnSpeed
     
@@ -684,8 +682,10 @@ timer("run", Interval, -1, function() {
     
     precomputeLocalization()
     
-    Driver = changed(Seat:driver()) ? Seat:driver() : Driver
-    Active = Driver:isValid()
+    Pod["Vehicle",entity] = Seat:driver() ? Seat : Base:getClass() == "acf_baseplate" ? Base : _NO_ENTITY
+    
+    Driver = Pod["Driver",entity]
+    Active = Pod["Active",number]
 
     local SprintVal = ((Forward | Backward | (MouseControl & (Left | Right))) & Sprint & !Crippled) ? SprintUpMul : -SprintDownMul
     local CrouchVal = !Throttle ? (Active ? Crouch : 1) : 0
