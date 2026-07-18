@@ -13,6 +13,7 @@ A mech needs a few basic things:
   * A Base
   * A number of feet
   * A cam controller (Though not wired to the E2)
+  * A pod controller (Just wire this up via Wirelink to the E2, no need to link it to a seat or anything)
 
 Spawn in all of these and wire them up to the E2 where appropriate. Reload the E2 with the *ConstrainAfterSpawn* var set to 1, or dupe it to make it set itself up. The E2 expects a base oriented to ang(0,90,0) and will actively reorient the base to this facing.
 
