@@ -2,10 +2,11 @@
 #Thank you to H4NK_7457, Octo and ChogChey for helping me test the chip as it evolved
 
 @name Dynamic Mech V1
-@inputs [Base FootL FootR]:entity [Pod]:wirelink [FootLLeg FootRLeg]:array [Seat]:entity #NOTE: Seat is not required if you an ACF base. Skip wiring it up in that case
+@inputs [Base FootL FootR]:entity [FootLLeg FootRLeg]:array [Seat]:entity #NOTE: Seat is not required if you an ACF base. Skip wiring it up in that case
 @outputs [Throttle Active]:number [Filter]:array
 @persist [ConstrainAfterSpawn Length Constant Damping Heavy StepLength StepHeight MinFootHeight MaxFootHeight PushDown OvershootMul Radius DebugRadius LinearRadius Diff CrouchHeight CrouchSpeed TiltInfluence TerrainInfluence MouseControl Speed StillTurnSpeed StillTurnAngle TurnSpeed TurnLimit SprintSpeedMul SprintLengthMul SprintStates SprintUpMul SprintDownMul SprintInertia SprintTurnInertia WaterMul MousePitchControl PitchWhilstCrouched PitchMax PitchMin PitchSpeed IdlePitchTarget BaseMass FootMass BaseInertia FootInertia BaseForce AngVelDamp StabilityRatio Interval CripplePercent CrippleInterval StepVol StepPitch SoundVolume BasePitch PitchRange StepCooldown Throttle Pitch EngineLoad MaxSpeed PitchVariation CrouchPersist Yaw Feet OriginalAmount Deviation ChromaticNumber Crippled TurnSpeedModified Stepping]:number
 @persist [DirMul LenX LenY LenZ LastMoveDir]:vector
+@persist [BaseWirelink]:wirelink
 @persist [EngineSound]:string
 @persist [Driver]:entity
 @persist [Entities LegEntities StepQueue]:array
@@ -216,6 +217,8 @@ if (first()|dupefinished())
     LenZ = vec(0,0,Length)
     
     TurnSpeedModified = TurnSpeed
+    
+    BaseWirelink = Base:wirelink()
     
     Throttle = Pitch = EngineLoad = PitchVariation = CrouchPersist = Yaw = Pitch = Forward = Backward = Left = Right = Sprint = Crouch = Freelook = Crippled = 0
     
@@ -682,10 +685,8 @@ timer("run", Interval, -1, function() {
     
     precomputeLocalization()
     
-    Pod["Vehicle",entity] = Seat:driver() ? Seat : Base:getClass() == "acf_baseplate" ? Base : _NO_ENTITY
-    
-    Driver = Pod["Driver",entity]
-    Active = Pod["Active",number]
+    Driver = Seat:isValid() ? Seat:driver() : Base:getClass() == "acf_baseplate" ? BaseWirelink["Vehicles",array][1,entity]:driver() : _NO_ENTITY
+    Active = Driver:isValid()
 
     local SprintVal = ((Forward | Backward | (MouseControl & (Left | Right))) & Sprint & !Crippled) ? SprintUpMul : -SprintDownMul
     local CrouchVal = !Throttle ? (Active ? Crouch : 1) : 0
